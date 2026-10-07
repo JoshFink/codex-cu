@@ -50,6 +50,16 @@ The `allow` and `forget` commands edit that file. The plugin's own two settings 
 
 Declines are honored. The plugin never routes around one.
 
+## Claude Desktop chat
+
+The Code tab in Claude Desktop picks the plugin up automatically. The chat surface does not load Claude Code plugins, so to use codex-cu there run:
+
+```
+/codex-cu:codex-cu desktop install
+```
+
+then restart Claude Desktop. This adds a `codex-cu` entry to `~/Library/Application Support/Claude/claude_desktop_config.json` pointing at a small wrapper in the plugin data dir, which always starts the newest installed plugin version. The chat surface has no Claude Code hooks, so `accept always` and `auto` do not apply there. Pre-allow apps with `allow <App>` from a Code session, or accept the prompt in chat if your Desktop version shows one. `desktop remove` undoes it.
+
 ## What's inside
 
 | File | Job |

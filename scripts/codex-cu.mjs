@@ -6,11 +6,12 @@
 //   forget <App|all>       remove an always-allow
 //   auto   on|off          auto-approve every app request (no dialogs)
 //   accept always|once     what pressing Accept in the dialog means
-import { existsSync, readdirSync } from 'node:fs';
+//   desktop install|remove|status  expose the server to the Claude Desktop chat surface too
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
-  CODEX_APPROVALS_PATH, CODEX_PLUGIN_CACHE, SETTINGS_PATH,
+  CODEX_APPROVALS_PATH, CODEX_PLUGIN_CACHE, SETTINGS_PATH, DATA_DIR,
   readJson, writeJson, readSettings, writeSettings,
 } from './config.mjs';
 
@@ -84,5 +85,51 @@ switch (cmd) {
     if (!['always', 'once'].includes(arg)) die('usage: accept always|once');
     writeSettings({ ...settings, acceptMeans: arg }); console.log(`dialog Accept now means: ${arg}`); break;
   }
-  default: die('usage: status | check | allow <App> | forget <App|all> | auto on|off | accept always|once');
+  case 'desktop': {
+    // Expose the same server to the Claude Desktop *chat* surface, which does not
+    // load Claude Code plugins. We point its config at a small wrapper in the plugin
+    // data dir (stable across plugin updates) that execs the newest installed launcher.
+    const DESKTOP_CFG = join(process.env.HOME, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+    const WRAPPER = join(DATA_DIR, 'desktop-launch.mjs');
+    if (!['install', 'remove', 'status'].includes(arg)) die('usage: desktop install|remove|status');
+    const cfg = readJson(DESKTOP_CFG, null);
+    if (arg === 'status') {
+      console.log(`Claude Desktop config: ${cfg ? DESKTOP_CFG : 'not found (is Claude Desktop installed?)'}`);
+      console.log(`codex-cu in Desktop chat: ${cfg?.mcpServers?.['codex-cu'] ? 'yes' : 'no'}`);
+      break;
+    }
+    if (!cfg) die(`Claude Desktop config not found at ${DESKTOP_CFG}. Install and launch Claude Desktop first.`);
+    if (arg === 'remove') {
+      if (cfg.mcpServers) delete cfg.mcpServers['codex-cu'];
+      writeJson(DESKTOP_CFG, cfg); console.log('removed codex-cu from Claude Desktop chat. Restart Claude Desktop.'); break;
+    }
+    writeJson(WRAPPER, null); // ensure dir exists
+    const wrapper = `#!/usr/bin/env node
+// codex-cu Desktop wrapper: exec the newest installed plugin's launcher so the
+// Claude Desktop chat config never has to track plugin versions.
+import { readdirSync, existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+const cache = join(homedir(), '.claude', 'plugins', 'cache', 'codex-cu', 'codex-cu');
+const vers = existsSync(cache) ? readdirSync(cache).filter((v) => existsSync(join(cache, v, 'scripts', 'launch.mjs'))) : [];
+vers.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+let launcher = vers.length ? join(cache, vers.at(-1), 'scripts', 'launch.mjs') : null;
+if (!launcher && process.env.CODEX_CU_DEV_ROOT) launcher = join(process.env.CODEX_CU_DEV_ROOT, 'scripts', 'launch.mjs');
+if (!launcher) { console.error('codex-cu: plugin not installed (claude plugin install codex-cu@codex-cu)'); process.exit(2); }
+const child = spawn(process.execPath, [launcher], { stdio: 'inherit', env: { ...process.env, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA ?? join(homedir(), '.claude', 'plugins', 'data', 'codex-cu') } });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => child.kill(sig));
+child.on('exit', (code, sig) => process.exit(sig ? 1 : code ?? 0));
+`;
+    writeFileSync(WRAPPER, wrapper);
+    // Claude Desktop runs servers with a minimal PATH; use the absolute node that runs us.
+    cfg.mcpServers ??= {};
+    const nodeBin = ['/opt/homebrew/bin/node', '/usr/local/bin/node'].find(existsSync) ?? process.execPath;
+    cfg.mcpServers['codex-cu'] = { command: nodeBin, args: [WRAPPER] };
+    writeJson(DESKTOP_CFG, cfg);
+    console.log(`added codex-cu to Claude Desktop chat (${DESKTOP_CFG}). Restart Claude Desktop.`);
+    console.log('Note: the chat surface has no Claude Code hooks, so pre-allow apps with "allow <App>" or accept the prompt when it appears.');
+    break;
+  }
+  default: die('usage: status | check | allow <App> | forget <App|all> | auto on|off | accept always|once | desktop install|remove|status');
 }
