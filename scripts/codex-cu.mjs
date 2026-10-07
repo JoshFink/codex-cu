@@ -8,7 +8,7 @@
 //   auto   on|off          auto-approve every app request (no dialogs)
 //   accept always|once     what pressing Accept in the dialog means
 //   desktop install|remove|status  expose the server to the Claude Desktop chat surface too
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync, mkdirSync, copyFileSync, chmodSync, realpathSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
@@ -175,12 +175,54 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => child.k
 child.on('exit', (code, sig) => process.exit(sig ? 1 : code ?? 0));
 `;
     writeFileSync(WRAPPER, wrapper);
-    // Claude Desktop runs servers with a minimal PATH; use the absolute node that runs us.
+    // macOS (26+) does not persist the "would like to access data from other apps"
+    // grant for a bare executable such as Homebrew's node, and Claude Desktop makes
+    // each MCP server its own TCC-responsible process. So the Desktop entry runs a
+    // minimal app bundle whose executable is a copy of node: TCC then records the
+    // grant against the bundle identifier and the prompt appears once, as "Codex CU".
+    const APP = join(DATA_DIR, 'Codex CU.app');
+    const exe = join(APP, 'Contents', 'MacOS', 'codex-cu');
+    // Homebrew's node is a small stub linked against libnode.dylib, so a copy of it
+    // cannot run on its own. Prefer the static node the ChatGPT app bundles (the same
+    // one Codex's own server runs on); fall back to a self-contained system node.
+    const staticNode = (() => {
+      for (const plugin of ['unified-computer-use', 'computer-use']) {
+        const root = join(CODEX_PLUGIN_CACHE, plugin);
+        if (!existsSync(root)) continue;
+        for (const v of readdirSync(root).sort().reverse()) {
+          const cfgPath = join(root, v, '.mcp.json'); if (!existsSync(cfgPath)) continue;
+          const servers = readJson(cfgPath, {}).mcpServers ?? {};
+          for (const s of Object.values(servers)) { const c = s?.command ?? ''; if (/\/node$/.test(c) && existsSync(c) && statSync(c).size > 20e6) return c; }
+          const env = Object.values(servers)[0]?.env ?? {}; const p = env.NODE_REPL_NODE_PATH; if (p && existsSync(p) && statSync(p).size > 20e6) return p;
+        }
+      }
+      const self = realpathSync(process.execPath);
+      return statSync(self).size > 20e6 ? self : null;
+    })();
+    if (!staticNode) die('no self-contained node binary found (the ChatGPT app normally provides one). Install Codex Computer Use first.');
+    mkdirSync(join(APP, 'Contents', 'MacOS'), { recursive: true });
+    copyFileSync(staticNode, exe); chmodSync(exe, 0o755);
+    writeFileSync(join(APP, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.joshfink.codex-cu</string>
+  <key>CFBundleName</key><string>Codex CU</string>
+  <key>CFBundleDisplayName</key><string>Codex CU</string>
+  <key>CFBundleExecutable</key><string>codex-cu</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSBackgroundOnly</key><true/>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+</dict></plist>
+`);
+    try { execFileSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.joshfink.codex-cu', APP], { stdio: 'ignore' }); }
+    catch { console.error('warning: ad-hoc codesign failed; the permission prompt may not persist'); }
     cfg.mcpServers ??= {};
-    const nodeBin = ['/opt/homebrew/bin/node', '/usr/local/bin/node'].find(existsSync) ?? process.execPath;
-    cfg.mcpServers['codex-cu'] = { command: nodeBin, args: [WRAPPER] };
+    cfg.mcpServers['codex-cu'] = { command: exe, args: [WRAPPER] };
     writeJson(DESKTOP_CFG, cfg);
     console.log(`added codex-cu to Claude Desktop chat (${DESKTOP_CFG}). Restart Claude Desktop.`);
+    console.log(`runs as "${APP}" (bundled node copied from ${staticNode}). Re-run "desktop install" after a ChatGPT app update.`);
     console.log('Note: Claude Desktop chat cannot show approval prompts, so the proxy approves only apps you pre-allowed with "allow <App>" (or everything when "auto on"). Others are declined.');
     break;
   }
