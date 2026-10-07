@@ -19,9 +19,38 @@ import {
 const [cmd = 'status', ...rest] = process.argv.slice(2);
 const arg = rest.join(' ').trim();
 const die = (m) => { console.error(m); process.exit(1); };
-const osa = (script) => { try { return execFileSync('osascript', ['-e', script], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
-const bundleId = (name) => osa(`id of app "${name.replace(/"/g, '')}"`);
-const appName = (id) => osa(`name of application id "${id}"`) ?? id;
+// App lookups read Info.plist files directly. No AppleScript: an Apple event to an
+// app triggers a macOS Automation permission prompt (and can launch the app),
+// which over SSH shows up as "sshd-keygen-wrapper wants access to control X".
+const APP_DIRS = ['/Applications', join(process.env.HOME, 'Applications'), '/System/Applications', '/System/Applications/Utilities', '/System/Library/CoreServices'];
+const plistValue = (plist, key) => { try { return execFileSync('defaults', ['read', plist, key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; } catch { return null; } };
+function* installedApps() {
+  for (const dir of APP_DIRS) {
+    if (!existsSync(dir)) continue;
+    for (const app of readdirSync(dir).filter((f) => f.endsWith('.app'))) {
+      const plist = join(dir, app, 'Contents', 'Info.plist');
+      if (existsSync(plist)) yield { name: app.replace(/\.app$/, ''), plist };
+    }
+  }
+}
+const bundleId = (name) => {
+  const want = name.toLowerCase();
+  for (const a of installedApps()) if (a.name.toLowerCase() === want) return plistValue(a.plist, 'CFBundleIdentifier');
+  // Fallback: Spotlight index, still no Apple events.
+  try {
+    const hit = execFileSync('mdfind', [`kMDItemKind == 'Application' && kMDItemDisplayName == '${name.replace(/'/g, '')}'`], { encoding: 'utf8' }).split('\n')[0];
+    if (hit) return plistValue(join(hit, 'Contents', 'Info.plist'), 'CFBundleIdentifier');
+  } catch {}
+  return null;
+};
+const appName = (id) => {
+  for (const a of installedApps()) if (plistValue(a.plist, 'CFBundleIdentifier') === id) return a.name;
+  try {
+    const hit = execFileSync('mdfind', [`kMDItemCFBundleIdentifier == '${id}'`], { encoding: 'utf8' }).split('\n')[0];
+    if (hit) return hit.split('/').pop().replace(/\.app$/, '');
+  } catch {}
+  return id;
+};
 
 function loadCodexApprovals() {
   const a = readJson(CODEX_APPROVALS_PATH, { approvedBundleIdentifiers: [] });
@@ -73,19 +102,15 @@ switch (cmd) {
     const added = [];
     const add = (id, label) => { if (id && !a.approvedBundleIdentifiers.includes(id)) { a.approvedBundleIdentifiers.push(id); added.push(`${label} (${id})`); } };
     if (arg === '--installed') {
-      for (const dir of ['/Applications', join(process.env.HOME, 'Applications'), '/System/Applications', '/System/Applications/Utilities']) {
-        if (!existsSync(dir)) continue;
-        for (const app of readdirSync(dir).filter((f) => f.endsWith('.app'))) {
-          const plist = join(dir, app, 'Contents', 'Info.plist');
-          if (!existsSync(plist)) continue;
-          let id = null;
-          try { id = execFileSync('defaults', ['read', plist, 'CFBundleIdentifier'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
-          add(id, app.replace(/\.app$/, ''));
-        }
-      }
+      for (const a of installedApps()) add(plistValue(a.plist, 'CFBundleIdentifier'), a.name);
     } else if (arg === '--running') {
-      const out = osa('tell application "System Events" to get bundle identifier of every application process whose background only is false') ?? '';
-      for (const id of out.split(',').map((s) => s.trim()).filter(Boolean)) add(id, appName(id));
+      // Running GUI apps from the process list: any process whose executable sits in
+      // <Something>.app/Contents/MacOS/. No System Events, so no permission prompt.
+      const ps = execFileSync('ps', ['-axo', 'command='], { encoding: 'utf8' });
+      const bundles = new Set();
+      const userDirs = APP_DIRS.filter((d) => !d.includes('CoreServices'));
+      for (const line of ps.split('\n')) { const m = line.match(/^(\/.*?\.app)\/Contents\/MacOS\//); if (m && !/\.app\/.*\.app$/.test(m[1]) && userDirs.some((d) => m[1].startsWith(d + '/'))) bundles.add(m[1]); }
+      for (const b of bundles) { const plist = join(b, 'Contents', 'Info.plist'); if (!existsSync(plist)) continue; const id = plistValue(plist, 'CFBundleIdentifier'); const ui = plistValue(plist, 'LSUIElement'); const bg = plistValue(plist, 'LSBackgroundOnly'); if (id && ui !== '1' && bg !== '1') add(id, b.split('/').pop().replace(/\.app$/, '')); }
     } else {
       for (const name of arg.split(',').map((s) => s.trim()).filter(Boolean)) {
         const id = bundleId(name); if (!id) { console.error(`skipped: no app named "${name}"`); continue; }
