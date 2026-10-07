@@ -54,13 +54,13 @@ Declines are honored. The plugin never routes around one.
 
 ## Claude Desktop chat
 
-The Code tab in Claude Desktop picks the plugin up automatically. The chat surface does not load Claude Code plugins, so to use codex-cu there run:
+The Code tab in Claude Desktop picks the plugin up automatically. The chat surface does not load Claude Code plugins and, as of Claude Desktop 2.26454, its MCP client does not support elicitation, which the Codex server requires even for always-allowed apps. The plugin covers both with:
 
 ```
 /codex-cu:codex-cu desktop install
 ```
 
-then restart Claude Desktop. This adds a `codex-cu` entry to `~/Library/Application Support/Claude/claude_desktop_config.json` pointing at a small wrapper in the plugin data dir, which always starts the newest installed plugin version. The chat surface has no Claude Code hooks, so `accept always` and `auto` do not apply there. Pre-allow apps with `allow <App>` from a Code session, or accept the prompt in chat if your Desktop version shows one. `desktop remove` undoes it.
+then restart Claude Desktop. This adds a `codex-cu` entry to `~/Library/Application Support/Claude/claude_desktop_config.json` that runs a small proxy (`scripts/desktop-proxy.mjs`) in front of the server. The proxy declares the elicitation capability on the client's behalf and answers approval requests itself: apps on your always-allow list are approved, everything is approved when `auto on` is set, and anything else is declined with a clear "not approved" result. No dialog is possible in chat, so pre-allow the apps you want with `allow <App>` or `allow --running` first. `desktop remove` undoes it.
 
 ## What's inside
 
@@ -70,6 +70,7 @@ then restart Claude Desktop. This adds a `codex-cu` entry to `~/Library/Applicat
 | `scripts/launch.mjs` | Finds the newest Codex computer-use plugin under `~/.codex/plugins/cache/openai-bundled/` and spawns the server it describes, with its env. Prefers `unified-computer-use` (one `js` tool, persistent REPL); falls back to the legacy `computer-use` plugin (direct `list_apps`, `click`, `type_text` tools). No hardcoded app paths. |
 | `hooks/hooks.json`, `scripts/hook.mjs` | Elicitation and ElicitationResult hooks that implement `auto` and `accept always`. |
 | `commands/codex-cu.md`, `scripts/codex-cu.mjs` | The slash command and its CLI. |
+| `scripts/desktop-proxy.mjs` | Elicitation-answering proxy for MCP clients without elicitation support (Claude Desktop chat). |
 | `scripts/selftest.mjs` | Initialize, list tools, one read-only call. `node scripts/selftest.mjs` from the plugin root. |
 
 ## Why this works
