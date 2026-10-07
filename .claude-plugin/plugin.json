@@ -1,7 +1,7 @@
 {
   "name": "codex-cu",
   "displayName": "Codex Computer Use",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Drive Mac apps from Claude Code through the Codex computer-use MCP server that ships inside the ChatGPT desktop app. Approval prompts become one Claude Code dialog per app.",
   "author": { "name": "Josh Finkelstein", "url": "https://github.com/JoshFink" },
   "homepage": "https://github.com/JoshFink/codex-cu",

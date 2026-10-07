@@ -7,8 +7,8 @@
 //   forget <App|all>       remove an always-allow
 //   auto   on|off          auto-approve every app request (no dialogs)
 //   accept always|once     what pressing Accept in the dialog means
-//   desktop install|remove|status  expose the server to the Claude Desktop chat surface too
-import { existsSync, readdirSync, writeFileSync, mkdirSync, copyFileSync, chmodSync, realpathSync, statSync } from 'node:fs';
+//   desktop install|remove|status|fda  Claude Desktop chat surface (fda opens the Full Disk Access pane)
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, chmodSync, realpathSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
@@ -144,7 +144,12 @@ switch (cmd) {
     // data dir (stable across plugin updates) that execs the newest installed launcher.
     const DESKTOP_CFG = join(process.env.HOME, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
     const WRAPPER = join(DATA_DIR, 'desktop-launch.mjs');
-    if (!['install', 'remove', 'status'].includes(arg)) die('usage: desktop install|remove|status');
+    if (!['install', 'remove', 'status', 'fda'].includes(arg)) die('usage: desktop install|remove|status|fda');
+    if (arg === 'fda') {
+      execFileSync('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles']);
+      console.log(`Full Disk Access pane opened. Click +, press Cmd+Shift+G, paste:\n  ${join(DATA_DIR, 'Codex CU.app')}\nthen restart Claude Desktop.`);
+      break;
+    }
     const cfg = readJson(DESKTOP_CFG, null);
     if (arg === 'status') {
       console.log(`Claude Desktop config: ${cfg ? DESKTOP_CFG : 'not found (is Claude Desktop installed?)'}`);
@@ -216,15 +221,35 @@ child.on('exit', (code, sig) => process.exit(sig ? 1 : code ?? 0));
   <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict></plist>
 `);
-    try { execFileSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.joshfink.codex-cu', APP], { stdio: 'ignore' }); }
-    catch { console.error('warning: ad-hoc codesign failed; the permission prompt may not persist'); }
+    // Sign with a Developer ID when one is usable so the bundle's code requirement is
+    // identity-based and a Full Disk Access grant survives rebuilds. Ad-hoc otherwise
+    // (its requirement is a code hash, so FDA must be re-granted after each rebuild).
+    const identityFile = join(process.env.HOME, '.atlas-local', 'codesign-identity');
+    let identity = existsSync(identityFile) ? readFileSync(identityFile, 'utf8').trim() : '';
+    if (!identity) { try { identity = (execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).match(/"(Developer ID Application: [^"]+)"/) || [])[1] ?? ''; } catch {} }
+    let signedWith = 'ad-hoc';
+    if (identity) {
+      try { execFileSync('codesign', ['--force', '--sign', identity, '--identifier', 'com.joshfink.codex-cu', '--timestamp=none', APP], { stdio: 'ignore' }); signedWith = identity; }
+      catch { console.error(`note: signing with "${identity}" failed (locked keychain over ssh?); falling back to ad-hoc`); }
+    }
+    if (signedWith === 'ad-hoc') {
+      try { execFileSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.joshfink.codex-cu', APP], { stdio: 'ignore' }); }
+      catch { console.error('warning: ad-hoc codesign failed'); }
+    }
     cfg.mcpServers ??= {};
     cfg.mcpServers['codex-cu'] = { command: exe, args: [WRAPPER] };
     writeJson(DESKTOP_CFG, cfg);
     console.log(`added codex-cu to Claude Desktop chat (${DESKTOP_CFG}). Restart Claude Desktop.`);
-    console.log(`runs as "${APP}" (bundled node copied from ${staticNode}). Re-run "desktop install" after a ChatGPT app update.`);
+    console.log(`runs as "${APP}", signed ${signedWith === 'ad-hoc' ? 'ad-hoc' : 'with ' + signedWith}; node copied from ${staticNode}. Re-run "desktop install" after a ChatGPT app update.`);
+    console.log('');
+    console.log('ONE-TIME STEP: macOS blocks "access data from other apps" for any process without Full Disk Access, and');
+    console.log('Claude.app\'s own grant does not reach MCP servers. Give the bundle Full Disk Access once:');
+    console.log('  System Settings > Privacy & Security > Full Disk Access > + > press Cmd+Shift+G and paste:');
+    console.log(`  ${APP}`);
+    console.log('  then restart Claude Desktop. "desktop fda" opens that pane.');
+    if (signedWith === 'ad-hoc') console.log('  (ad-hoc signature: re-add after any future "desktop install").');
     console.log('Note: Claude Desktop chat cannot show approval prompts, so the proxy approves only apps you pre-allowed with "allow <App>" (or everything when "auto on"). Others are declined.');
     break;
   }
-  default: die('usage: status | check | allow <App> | forget <App|all> | auto on|off | accept always|once | desktop install|remove|status');
+  default: die('usage: status | check | allow <App> | forget <App|all> | auto on|off | accept always|once | desktop install|remove|status|fda');
 }
