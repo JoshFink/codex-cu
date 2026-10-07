@@ -2,7 +2,8 @@
 // codex-cu CLI, behind the /codex-cu command.
 //   status                 route, settings, always-allowed apps
 //   check                  prerequisites only
-//   allow  <App>           always-allow an app by display name
+//   allow  <App[, App...]>  always-allow apps by display name
+//   allow  --running | --installed   bulk always-allow
 //   forget <App|all>       remove an always-allow
 //   auto   on|off          auto-approve every app request (no dialogs)
 //   accept always|once     what pressing Accept in the dialog means
@@ -63,11 +64,38 @@ switch (cmd) {
     break;
   }
   case 'allow': {
-    if (!arg) die('usage: allow <App name>');
-    const id = bundleId(arg); if (!id) die(`no app named "${arg}" found`);
+    // allow <App>                 one app by display name
+    // allow App1, App2, App3      several, comma separated
+    // allow --running             every app currently running with a window
+    // allow --installed           every app in /Applications, ~/Applications, /System/Applications
+    if (!arg) die('usage: allow <App[, App...]> | allow --running | allow --installed');
     const a = loadCodexApprovals();
-    if (!a.approvedBundleIdentifiers.includes(id)) a.approvedBundleIdentifiers.push(id);
-    writeJson(CODEX_APPROVALS_PATH, a); console.log(`always-allowed ${arg} (${id})`); break;
+    const added = [];
+    const add = (id, label) => { if (id && !a.approvedBundleIdentifiers.includes(id)) { a.approvedBundleIdentifiers.push(id); added.push(`${label} (${id})`); } };
+    if (arg === '--installed') {
+      for (const dir of ['/Applications', join(process.env.HOME, 'Applications'), '/System/Applications', '/System/Applications/Utilities']) {
+        if (!existsSync(dir)) continue;
+        for (const app of readdirSync(dir).filter((f) => f.endsWith('.app'))) {
+          const plist = join(dir, app, 'Contents', 'Info.plist');
+          if (!existsSync(plist)) continue;
+          let id = null;
+          try { id = execFileSync('defaults', ['read', plist, 'CFBundleIdentifier'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+          add(id, app.replace(/\.app$/, ''));
+        }
+      }
+    } else if (arg === '--running') {
+      const out = osa('tell application "System Events" to get bundle identifier of every application process whose background only is false') ?? '';
+      for (const id of out.split(',').map((s) => s.trim()).filter(Boolean)) add(id, appName(id));
+    } else {
+      for (const name of arg.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const id = bundleId(name); if (!id) { console.error(`skipped: no app named "${name}"`); continue; }
+        add(id, name);
+      }
+    }
+    writeJson(CODEX_APPROVALS_PATH, a);
+    console.log(added.length ? `always-allowed ${added.length} app(s):\n  ${added.join('\n  ')}` : 'nothing new to allow');
+    console.log(`total always-allowed: ${a.approvedBundleIdentifiers.length}`);
+    break;
   }
   case 'forget': {
     if (!arg) die('usage: forget <App name|all>');

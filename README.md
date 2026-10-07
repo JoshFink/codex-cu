@@ -40,7 +40,9 @@ Codex asks before touching each app, and Claude Code shows that question as a na
 | :--- | :--- |
 | `/codex-cu:codex-cu accept always` | One Accept permanently allows that app. Codex records it in its own always-allow store, shared with the ChatGPT app. Recommended once you trust the setup. |
 | `/codex-cu:codex-cu auto on` | Approve every app request with no dialog. Off by default. |
-| `/codex-cu:codex-cu allow Safari` | Always-allow an app by name without waiting for a prompt. |
+| `/codex-cu:codex-cu allow Safari` | Always-allow an app by name without waiting for a prompt. Several: `allow Safari, Mail, Notes`. |
+| `/codex-cu:codex-cu allow --running` | Always-allow every app currently open with a window. |
+| `/codex-cu:codex-cu allow --installed` | Always-allow everything in /Applications, ~/Applications and /System/Applications. Broad: Codex can then read any of those apps without asking, in Claude and in the ChatGPT app. |
 | `/codex-cu:codex-cu forget Safari`, `forget all` | Remove always-allows. Does not turn `auto` off. |
 | `/codex-cu:codex-cu status` | Show all of the above plus which Codex plugin version is in use. |
 

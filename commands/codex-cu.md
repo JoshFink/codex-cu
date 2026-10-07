@@ -1,6 +1,6 @@
 ---
 description: Codex Computer Use bridge - status, allow/forget apps, auto-approve, accept mode
-argument-hint: status | check | allow <App> | forget <App|all> | auto on|off | accept always|once | desktop install|remove|status
+argument-hint: status | check | allow <App[, App...]|--running|--installed> | forget <App|all> | auto on|off | accept always|once | desktop install|remove|status
 ---
 Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-cu.mjs" $ARGUMENTS` (default `status` when no arguments) and show the output verbatim. If it reports missing prerequisites, relay the fix it prints.
 
