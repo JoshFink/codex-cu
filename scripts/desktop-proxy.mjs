@@ -6,15 +6,19 @@
 // client declared the `elicitation` capability at initialize. This proxy:
 //   1. adds `elicitation: {}` to the client's initialize capabilities,
 //   2. answers the server's elicitation/create requests itself, from policy:
-//        autoApproveAll on            -> accept
-//        app in Codex's always-allow  -> accept
-//        otherwise                    -> decline (the tool result then tells the
-//                                        model the app is not approved; pre-allow
-//                                        it with `codex-cu allow <App>`)
+//        autoApproveAll on  -> accept
+//        otherwise          -> decline (the tool result then tells the model the
+//                              app is not approved; pre-allow it with
+//                              `codex-cu allow <App>`)
+//      The server consults its own always-allow store before asking, so an app it
+//      asks about is by definition not pre-allowed. We deliberately do not read
+//      that store here: it sits in an OpenAI Group Container, and reading it from
+//      under Claude Desktop triggers macOS's "Node would like to access data from
+//      other apps" prompt.
 //   3. passes every other message through untouched.
 // Transport is newline-delimited JSON-RPC on stdio, same as the server.
 import { spawn } from 'node:child_process';
-import { CODEX_APPROVALS_PATH, readJson, readSettings } from './config.mjs';
+import { readSettings } from './config.mjs';
 
 const launcher = new URL('./launch.mjs', import.meta.url).pathname;
 const server = spawn(process.execPath, [launcher], { stdio: ['pipe', 'pipe', 'inherit'], env: process.env });
@@ -27,9 +31,6 @@ function approved(params) {
   const cfg = readSettings();
   const persist = cfg.acceptMeans === 'always' ? { persist: 'always' } : {};
   if (cfg.autoApproveAll) return { action: 'accept', content: persist };
-  const app = params?._meta?.tool_params?.app;
-  const store = readJson(CODEX_APPROVALS_PATH, { approvedBundleIdentifiers: [] }).approvedBundleIdentifiers ?? [];
-  if (app && store.includes(app)) return { action: 'accept', content: {} };
   return null;
 }
 
