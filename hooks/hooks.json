@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "Elicitation": [
+      {
+        "matcher": ".*codex-cu.*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs"], "timeout": 5 }
+        ]
+      }
+    ],
+    "ElicitationResult": [
+      {
+        "matcher": ".*codex-cu.*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs"], "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

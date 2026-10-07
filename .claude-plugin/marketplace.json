@@ -1,0 +1,12 @@
+{
+  "name": "codex-cu",
+  "owner": { "name": "Josh Finkelstein", "url": "https://github.com/JoshFink" },
+  "metadata": { "description": "Codex Computer Use bridge for Claude Code" },
+  "plugins": [
+    {
+      "name": "codex-cu",
+      "source": "./",
+      "description": "Drive Mac apps from Claude Code through the Codex computer-use server in the ChatGPT desktop app"
+    }
+  ]
+}
