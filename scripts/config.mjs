@@ -8,7 +8,8 @@ const HOME = homedir();
 // Our settings live in the plugin data dir (survives plugin updates). Standalone
 // installs without the plugin runtime fall back to ~/.claude/mcp/codex-cu/.
 export const DATA_DIR = process.env.CLAUDE_PLUGIN_DATA || join(HOME, '.claude', 'mcp', 'codex-cu');
-export const SETTINGS_PATH = join(DATA_DIR, 'approvals.json');
+// CODEX_CU_SETTINGS overrides the file path (used by tests).
+export const SETTINGS_PATH = process.env.CODEX_CU_SETTINGS || join(DATA_DIR, 'approvals.json');
 
 // Codex's own always-allow store. The single source of truth for allowed apps;
 // the ChatGPT app and this plugin both read and write it.

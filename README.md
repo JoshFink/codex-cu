@@ -70,7 +70,7 @@ then restart Claude Desktop. This adds a `codex-cu` entry to `~/Library/Applicat
 | :--- | :--- |
 | `.mcp.json` | Declares the `codex-cu` MCP server, started by `scripts/launch.mjs`. |
 | `scripts/launch.mjs` | Finds the newest Codex computer-use plugin under `~/.codex/plugins/cache/openai-bundled/` and spawns the server it describes, with its env. Prefers `unified-computer-use` (one `js` tool, persistent REPL); falls back to the legacy `computer-use` plugin (direct `list_apps`, `click`, `type_text` tools). No hardcoded app paths. |
-| `hooks/hooks.json`, `scripts/hook.mjs` | Elicitation and ElicitationResult hooks that implement `auto` and `accept always`. |
+| `hooks/hooks.json`, `scripts/hook.mjs` | Elicitation and ElicitationResult hooks that implement `auto` and `accept always`, plus a PreToolUse hook that denies Codex browser-surface calls. |
 | `commands/codex-cu.md`, `scripts/codex-cu.mjs` | The slash command and its CLI. |
 | `scripts/desktop-proxy.mjs` | Elicitation-answering proxy for MCP clients without elicitation support (Claude Desktop chat). |
 | `scripts/selftest.mjs` | Initialize, list tools, one read-only call. `node scripts/selftest.mjs` from the plugin root. |
@@ -79,9 +79,9 @@ then restart Claude Desktop. This adds a `codex-cu` entry to `~/Library/Applicat
 
 The ChatGPT app's Computer Use feature is an ordinary MCP server over stdio. Its config lives in `~/.codex/plugins/cache/openai-bundled/unified-computer-use/<version>/.mcp.json`. Any MCP client can start it. The only wrinkle is that it asks for app approval through MCP elicitation, and wants `content: {persist: "always"}` in the answer to remember a choice. Claude Code handles elicitation natively and exposes hook events for it, so the whole approval layer is a 40-line hook.
 
-## Known limits
+## Limits
 
-- Browser surfaces (`cua.getBrowser`, tabs) fail with "Missing required Codex turn metadata". The server expects Codex-specific metadata on those calls. Native Mac apps work.
+- Browser surfaces (`cua.createBrowserTab`, `cua.getBrowser`, `cua.getTab`, `cua.browsers`) fail with "Missing required Codex turn metadata". The server expects Codex-specific metadata on those calls. Native Mac apps work, and so does a browser treated as one: `let b = await cua.getApp("Brave Browser")` (or "Google Chrome", "Safari") returns the page content in its accessibility tree. To open a URL, click the address bar, `b.typeText(url)`, `b.pressKey("Return")`. A PreToolUse hook denies the browser-surface calls up front and points at this route.
 - Headless `claude -p` cannot show the dialog. Use `auto on` or `allow` beforehand for unattended runs.
 - Claude Code's own desktop computer-use is not disabled while this is installed. Name the `codex-cu` tool in your prompt when you want this route.
 - If the ChatGPT app was renamed by an update, you may have both `Codex.app` and `ChatGPT.app`. The older `Codex.app` only knows the legacy plugin. Launch `ChatGPT.app`.
